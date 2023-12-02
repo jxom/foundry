@@ -535,6 +535,7 @@ impl fmt::Display for CallTrace {
                 CallKind::StaticCall => " [staticcall]",
                 CallKind::CallCode => " [callcode]",
                 CallKind::DelegateCall => " [delegatecall]",
+                CallKind::AuthCall => " [authcall]",
                 CallKind::Create | CallKind::Create2 => unreachable!(),
             };
 

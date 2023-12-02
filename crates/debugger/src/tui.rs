@@ -677,6 +677,7 @@ Line::from(Span::styled("[t]: stack labels | [m]: memory decoding | [shift + j/k
                 CallKind::StaticCall => "Contract staticcall",
                 CallKind::CallCode => "Contract callcode",
                 CallKind::DelegateCall => "Contract delegatecall",
+                CallKind::AuthCall => "Contract authcall",
             })
             .borders(Borders::ALL);
 
@@ -1257,7 +1258,8 @@ Line::from(Span::styled("[t]: stack labels | [m]: memory decoding | [shift + j/k
                                     (i == (offset + size - 1) / 32 &&
                                         j <= (offset + size - 1) % 32)
                                 {
-                                    // [offset, offset + size] is the memory region to be colored.
+                                    // [offset, offset + size] is the memory region to be
+                                    // colored.
                                     // If a byte at row i and column j in the memory panel
                                     // falls in this region, set the color.
                                     Style::default().fg(color)

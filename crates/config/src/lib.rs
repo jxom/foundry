@@ -369,6 +369,9 @@ pub struct Config {
     /// Should be removed once EvmVersion Cancun is supported by solc
     pub cancun: bool,
 
+    /// Temporary config to enable [SpecId::PRAGUE]
+    pub prague: bool,
+
     /// The root path where the config detection started from, `Config::with_root`
     #[doc(hidden)]
     //  We're skipping serialization here, so it won't be included in the [`Config::to_string()`]
@@ -694,7 +697,9 @@ impl Config {
     /// Returns the [SpecId] derived from the configured [EvmVersion]
     #[inline]
     pub fn evm_spec_id(&self) -> SpecId {
-        if self.cancun {
+        if self.prague {
+            return SpecId::PRAGUE
+        } else if self.cancun {
             return SpecId::CANCUN
         }
         evm_spec_id(&self.evm_version)
@@ -1752,6 +1757,7 @@ impl Default for Config {
             profile: Self::DEFAULT_PROFILE,
             fs_permissions: FsPermissions::new([PathPermission::read("out")]),
             cancun: false,
+            prague: false,
             __root: Default::default(),
             src: "src".into(),
             test: "test".into(),

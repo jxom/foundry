@@ -199,6 +199,8 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cancun_block: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prague_block: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal_total_difficulty: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal_total_difficulty_passed: Option<bool>,

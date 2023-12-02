@@ -22,6 +22,7 @@ pub enum CallKind {
     StaticCall,
     CallCode,
     DelegateCall,
+    AuthCall,
     Create,
     Create2,
 }
@@ -33,6 +34,7 @@ impl From<CallScheme> for CallKind {
             CallScheme::StaticCall => CallKind::StaticCall,
             CallScheme::CallCode => CallKind::CallCode,
             CallScheme::DelegateCall => CallKind::DelegateCall,
+            CallScheme::AuthCall => CallKind::AuthCall,
         }
     }
 }
@@ -49,9 +51,11 @@ impl From<CreateScheme> for CallKind {
 impl From<CallKind> for ActionType {
     fn from(kind: CallKind) -> Self {
         match kind {
-            CallKind::Call | CallKind::StaticCall | CallKind::DelegateCall | CallKind::CallCode => {
-                ActionType::Call
-            }
+            CallKind::Call |
+            CallKind::StaticCall |
+            CallKind::DelegateCall |
+            CallKind::CallCode |
+            CallKind::AuthCall => ActionType::Call,
             CallKind::Create => ActionType::Create,
             CallKind::Create2 => ActionType::Create,
         }
@@ -65,6 +69,7 @@ impl From<CallKind> for CallType {
             CallKind::StaticCall => CallType::StaticCall,
             CallKind::CallCode => CallType::CallCode,
             CallKind::DelegateCall => CallType::DelegateCall,
+            CallKind::AuthCall => CallType::AuthCall,
             CallKind::Create => CallType::None,
             CallKind::Create2 => CallType::None,
         }
@@ -129,6 +134,7 @@ pub fn halt_to_instruction_result(halt: Halt) -> InstructionResult {
         Halt::CreateInitcodeSizeLimit => InstructionResult::CreateInitcodeSizeLimit,
         Halt::OverflowPayment => InstructionResult::OverflowPayment,
         Halt::StateChangeDuringStaticCall => InstructionResult::StateChangeDuringStaticCall,
+        Halt::ActiveAccountUnsetAuthCall => InstructionResult::ActiveAccountUnsetAuthCall,
         Halt::CallNotAllowedInsideStatic => InstructionResult::CallNotAllowedInsideStatic,
         Halt::OutOfFund => InstructionResult::OutOfFund,
         Halt::CallTooDeep => InstructionResult::CallTooDeep,

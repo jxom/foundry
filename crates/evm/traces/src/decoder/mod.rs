@@ -460,7 +460,7 @@ impl CallTraceDecoder {
     fn apply_label(&self, value: &DynSolValue) -> String {
         if let DynSolValue::Address(addr) = value {
             if let Some(label) = self.labels.get(addr) {
-                return format!("{label}: [{addr}]");
+                return format!("{label}: [{addr}]")
             }
         }
         format_token(value)

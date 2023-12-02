@@ -37,12 +37,14 @@ impl CallTraceNode {
     /// Returns the `Res` for a parity trace
     pub fn parity_result(&self) -> Res {
         match self.kind() {
-            CallKind::Call | CallKind::StaticCall | CallKind::CallCode | CallKind::DelegateCall => {
-                Res::Call(CallResult {
-                    gas_used: self.trace.gas_cost.into(),
-                    output: self.trace.output.to_raw().into(),
-                })
-            }
+            CallKind::Call |
+            CallKind::StaticCall |
+            CallKind::CallCode |
+            CallKind::DelegateCall |
+            CallKind::AuthCall => Res::Call(CallResult {
+                gas_used: self.trace.gas_cost.into(),
+                output: self.trace.output.to_raw().into(),
+            }),
             CallKind::Create | CallKind::Create2 => Res::Create(CreateResult {
                 gas_used: self.trace.gas_cost.into(),
                 code: self.trace.output.to_raw().into(),
@@ -62,16 +64,18 @@ impl CallTraceNode {
             })
         }
         match self.kind() {
-            CallKind::Call | CallKind::StaticCall | CallKind::CallCode | CallKind::DelegateCall => {
-                Action::Call(Call {
-                    from: self.trace.caller.to_ethers(),
-                    to: self.trace.address.to_ethers(),
-                    value: self.trace.value.to_ethers(),
-                    gas: self.trace.gas_cost.into(),
-                    input: self.trace.data.as_bytes().to_vec().into(),
-                    call_type: self.kind().into(),
-                })
-            }
+            CallKind::Call |
+            CallKind::StaticCall |
+            CallKind::CallCode |
+            CallKind::DelegateCall |
+            CallKind::AuthCall => Action::Call(Call {
+                from: self.trace.caller.to_ethers(),
+                to: self.trace.address.to_ethers(),
+                value: self.trace.value.to_ethers(),
+                gas: self.trace.gas_cost.into(),
+                input: self.trace.data.as_bytes().to_vec().into(),
+                call_type: self.kind().into(),
+            }),
             CallKind::Create | CallKind::Create2 => Action::Create(Create {
                 from: self.trace.caller.to_ethers(),
                 value: self.trace.value.to_ethers(),
