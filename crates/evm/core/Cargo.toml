@@ -17,6 +17,7 @@ foundry-compilers.workspace = true
 foundry-config.workspace = true
 foundry-macros.workspace = true
 
+alphanet-instructions.workspace = true
 alloy-dyn-abi = { workspace = true, features = ["arbitrary", "eip712"] }
 alloy-json-abi.workspace = true
 alloy-primitives = { workspace = true, features = ["serde", "getrandom", "arbitrary", "rlp"] }

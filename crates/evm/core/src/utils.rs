@@ -1,5 +1,6 @@
 pub use crate::ic::*;
 use crate::{constants::DEFAULT_CREATE2_DEPLOYER, InspectorExt};
+use alphanet_instructions::{context::InstructionsContext, eip3074, BoxedInstructionWithOpCode};
 use alloy_json_abi::{Function, JsonAbi};
 use alloy_primitives::{Address, FixedBytes, U256};
 use alloy_rpc_types::{Block, Transaction};
@@ -245,9 +246,29 @@ where
     // performance issues.
     let revm::primitives::EnvWithHandlerCfg { env, handler_cfg } = env;
     let context = revm::Context::new(revm::EvmContext::new_with_env(db, env), inspector);
+    let instructions_context = InstructionsContext::default();
     let mut handler = revm::Handler::new(handler_cfg);
     handler.append_handler_register_plain(revm::inspector_handle_register);
     handler.append_handler_register_plain(create2_handler_register);
+    handler.append_handler_register_box(Box::new(move |handler| {
+        if let Some(ref mut table) = handler.instruction_table {
+            for boxed_instruction_with_opcode in
+                eip3074::boxed_instructions(instructions_context.clone())
+            {
+                table.insert_boxed(
+                    boxed_instruction_with_opcode.opcode,
+                    boxed_instruction_with_opcode.boxed_instruction,
+                );
+            }
+        }
+        let post_execution_context = instructions_context.clone();
+        handler.post_execution.end = Arc::new(move |_, outcome: _| {
+            // at the end if the transaction execution we clear the instructions
+            post_execution_context.clear();
+            outcome
+        });
+    }));
+
     revm::Evm::new(context, handler)
 }
 
