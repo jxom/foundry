@@ -2,9 +2,11 @@
 
 use crate::{string, Cheatcode, Cheatcodes, Error, Result, Vm::*};
 use alloy_dyn_abi::DynSolType;
-use alloy_primitives::Bytes;
 use alloy_sol_types::SolValue;
-use std::env;
+use std::{env, sync::OnceLock};
+
+/// Stores the forge execution context for the duration of the program.
+static FORGE_CONTEXT: OnceLock<ForgeContext> = OnceLock::new();
 
 impl Cheatcode for setEnvCall {
     fn apply(&self, _state: &mut Cheatcodes) -> Result {
@@ -21,6 +23,13 @@ impl Cheatcode for setEnvCall {
             env::set_var(key, value);
             Ok(Default::default())
         }
+    }
+}
+
+impl Cheatcode for envExistsCall {
+    fn apply(&self, _state: &mut Cheatcodes) -> Result {
+        let Self { name } = self;
+        Ok(env::var(name).is_ok().abi_encode())
     }
 }
 
@@ -230,9 +239,22 @@ impl Cheatcode for envOr_12Call {
 impl Cheatcode for envOr_13Call {
     fn apply(&self, _state: &mut Cheatcodes) -> Result {
         let Self { name, delim, defaultValue } = self;
-        let default = defaultValue.iter().map(|vec| vec.clone().into()).collect::<Vec<Bytes>>();
+        let default = defaultValue.to_vec();
         env_array_default(name, delim, &default, &DynSolType::Bytes)
     }
+}
+
+impl Cheatcode for isContextCall {
+    fn apply(&self, _state: &mut Cheatcodes) -> Result {
+        let Self { context } = self;
+        Ok((FORGE_CONTEXT.get() == Some(context)).abi_encode())
+    }
+}
+
+/// Set `forge` command current execution context for the duration of the program.
+/// Execution context is immutable, subsequent calls of this function won't change the context.
+pub fn set_execution_context(context: ForgeContext) {
+    let _ = FORGE_CONTEXT.set(context);
 }
 
 fn env(key: &str, ty: &DynSolType) -> Result {
@@ -267,20 +289,14 @@ fn get_env(key: &str) -> Result<String> {
 /// doesn't leak the value.
 fn map_env_err<'a>(key: &'a str, value: &'a str) -> impl FnOnce(Error) -> Error + 'a {
     move |e| {
-        let e = e.to_string(); // failed parsing \"xy(123)\" as type `uint256`: parser error:\nxy(123)\n ^\nexpected at
-                               // least one digit
-        let mut e = e.as_str();
-        // cut off the message to not leak the value
-        let sep = if let Some(idx) = e.rfind(" as type `") {
-            e = &e[idx..];
-            ""
-        } else {
-            ": "
-        };
-        // ensure we're also removing the value from the underlying alloy parser error message, See
-        // [alloy_dyn_abi::parser::Error::parser]
-        let e = e.replacen(&format!("\n{value}\n"), &format!("\n${key}\n"), 1);
-        fmt_err!("failed parsing ${key}{sep}{e}")
+        // failed parsing <value> as type `uint256`: parser error:
+        // <value>
+        //   ^
+        //   expected at least one digit
+        let mut e = e.to_string();
+        e = e.replacen(&format!("\"{value}\""), &format!("${key}"), 1);
+        e = e.replacen(&format!("\n{value}\n"), &format!("\n${key}\n"), 1);
+        Error::from(e)
     }
 }
 
@@ -291,12 +307,11 @@ mod tests {
     #[test]
     fn parse_env_uint() {
         let key = "parse_env_uint";
-        let value = "xy(123)";
+        let value = "t";
         env::set_var(key, value);
 
         let err = env(key, &DynSolType::Uint(256)).unwrap_err().to_string();
-        assert!(!err.contains(value));
-        assert_eq!(err, "failed parsing $parse_env_uint as type `uint256`: parser error:\n$parse_env_uint\n ^\nexpected at least one digit");
+        assert_eq!(err.matches("$parse_env_uint").count(), 2, "{err:?}");
         env::remove_var(key);
     }
 }

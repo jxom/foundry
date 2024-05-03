@@ -10,7 +10,7 @@ static DEFAULT_CRATE_NAME: &str = "foundry-contracts";
 static DEFAULT_CRATE_VERSION: &str = "0.0.1";
 
 /// CLI arguments for `cast bind`.
-#[derive(Debug, Clone, Parser)]
+#[derive(Clone, Debug, Parser)]
 pub struct BindArgs {
     /// The contract address, or the path to an ABI Directory
     ///
@@ -18,7 +18,7 @@ pub struct BindArgs {
     path_or_address: String,
 
     /// Path to where bindings will be stored
-    #[clap(
+    #[arg(
         short,
         long,
         value_hint = ValueHint::DirPath,
@@ -30,7 +30,7 @@ pub struct BindArgs {
     ///
     /// This should be a valid crates.io crate name. However, this is currently not validated by
     /// this command.
-    #[clap(
+    #[arg(
         long,
         default_value = DEFAULT_CRATE_NAME,
         value_name = "NAME"
@@ -41,7 +41,7 @@ pub struct BindArgs {
     ///
     /// This should be a standard semver version string. However, it is not currently validated by
     /// this command.
-    #[clap(
+    #[arg(
         long,
         default_value = DEFAULT_CRATE_VERSION,
         value_name = "VERSION"
@@ -49,10 +49,10 @@ pub struct BindArgs {
     crate_version: String,
 
     /// Generate bindings as separate files.
-    #[clap(long)]
+    #[arg(long)]
     separate_files: bool,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     etherscan: EtherscanOpts,
 }
 

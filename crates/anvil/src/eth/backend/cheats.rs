@@ -1,15 +1,14 @@
 //! Support for "cheat codes" / bypass functions
 
-use anvil_core::eth::transaction::IMPERSONATED_SIGNATURE;
-use ethers::types::{Address, Signature};
-use foundry_evm::hashbrown::HashSet;
+use alloy_primitives::{Address, Signature};
+use anvil_core::eth::transaction::impersonated_signature;
 use parking_lot::RwLock;
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
 /// Manages user modifications that may affect the node's behavior
 ///
 /// Contains the state of executed, non-eth standard cheat code RPC
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct CheatsManager {
     /// shareable state
     state: Arc<RwLock<CheatsState>>,
@@ -70,7 +69,7 @@ impl CheatsManager {
 }
 
 /// Container type for all the state variables
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub struct CheatsState {
     /// All accounts that are currently impersonated
     pub impersonated_accounts: HashSet<Address>,
@@ -84,7 +83,7 @@ impl Default for CheatsState {
     fn default() -> Self {
         Self {
             impersonated_accounts: Default::default(),
-            bypass_signature: IMPERSONATED_SIGNATURE,
+            bypass_signature: impersonated_signature(),
             auto_impersonate_accounts: false,
         }
     }

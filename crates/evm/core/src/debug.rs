@@ -1,11 +1,12 @@
-use crate::utils::CallKind;
-use alloy_primitives::{Address, U256};
+use crate::opcodes;
+use alloy_primitives::{Address, Bytes, U256};
+use arrayvec::ArrayVec;
 use revm::interpreter::OpCode;
+use revm_inspectors::tracing::types::CallKind;
 use serde::{Deserialize, Serialize};
-use std::fmt::Display;
 
 /// An arena of [DebugNode]s
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct DebugArena {
     /// The arena of nodes
     pub arena: Vec<DebugNode>,
@@ -64,7 +65,7 @@ impl DebugArena {
     /// - An enum denoting the type of call this is
     ///
     /// This makes it easy to pretty print the execution steps.
-    pub fn flatten(&self, entry: usize) -> Vec<(Address, Vec<DebugStep>, CallKind)> {
+    pub fn flatten(&self, entry: usize) -> Vec<DebugNodeFlat> {
         let mut flattened = Vec::new();
         self.flatten_to(entry, &mut flattened);
         flattened
@@ -73,11 +74,11 @@ impl DebugArena {
     /// Recursively traverses the tree of debug nodes and flattens it into the given list.
     ///
     /// See [`flatten`](Self::flatten) for more information.
-    pub fn flatten_to(&self, entry: usize, out: &mut Vec<(Address, Vec<DebugStep>, CallKind)>) {
+    pub fn flatten_to(&self, entry: usize, out: &mut Vec<DebugNodeFlat>) {
         let node = &self.arena[entry];
 
         if !node.steps.is_empty() {
-            out.push((node.address, node.steps.clone(), node.kind));
+            out.push(node.flat());
         }
 
         for child in &node.children {
@@ -86,30 +87,75 @@ impl DebugArena {
     }
 }
 
-/// A node in the arena
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+/// A node in the arena.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct DebugNode {
-    /// Parent node index in the arena
+    /// Parent node index in the arena.
     pub parent: Option<usize>,
-    /// Children node indexes in the arena
+    /// Children node indexes in the arena.
     pub children: Vec<usize>,
-    /// Location in parent
+    /// Location in parent.
     pub location: usize,
     /// Execution context.
     ///
     /// Note that this is the address of the *code*, not necessarily the address of the storage.
     pub address: Address,
-    /// The kind of call this is
+    /// The kind of call this is.
     pub kind: CallKind,
-    /// Depth
+    /// Depth of the call.
     pub depth: usize,
-    /// The debug steps
+    /// The debug steps.
     pub steps: Vec<DebugStep>,
 }
 
+impl From<DebugNode> for DebugNodeFlat {
+    #[inline]
+    fn from(node: DebugNode) -> Self {
+        node.into_flat()
+    }
+}
+
+impl From<&DebugNode> for DebugNodeFlat {
+    #[inline]
+    fn from(node: &DebugNode) -> Self {
+        node.flat()
+    }
+}
+
 impl DebugNode {
+    /// Creates a new debug node.
     pub fn new(address: Address, depth: usize, steps: Vec<DebugStep>) -> Self {
         Self { address, depth, steps, ..Default::default() }
+    }
+
+    /// Flattens this node into a [`DebugNodeFlat`].
+    pub fn flat(&self) -> DebugNodeFlat {
+        DebugNodeFlat { address: self.address, kind: self.kind, steps: self.steps.clone() }
+    }
+
+    /// Flattens this node into a [`DebugNodeFlat`].
+    pub fn into_flat(self) -> DebugNodeFlat {
+        DebugNodeFlat { address: self.address, kind: self.kind, steps: self.steps }
+    }
+}
+
+/// Flattened [`DebugNode`] from an arena.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct DebugNodeFlat {
+    /// Execution context.
+    ///
+    /// Note that this is the address of the *code*, not necessarily the address of the storage.
+    pub address: Address,
+    /// The kind of call this is.
+    pub kind: CallKind,
+    /// The debug steps.
+    pub steps: Vec<DebugStep>,
+}
+
+impl DebugNodeFlat {
+    /// Creates a new debug node flat.
+    pub fn new(address: Address, kind: CallKind, steps: Vec<DebugStep>) -> Self {
+        Self { address, kind, steps }
     }
 }
 
@@ -118,16 +164,22 @@ impl DebugNode {
 /// It holds the current program counter (where in the program you are),
 /// the stack and memory (prior to the opcodes execution), any bytes to be
 /// pushed onto the stack, and the instruction counter for use with sourcemap.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DebugStep {
     /// Stack *prior* to running the associated opcode
     pub stack: Vec<U256>,
     /// Memory *prior* to running the associated opcode
-    pub memory: Vec<u8>,
+    pub memory: Bytes,
+    /// Calldata *prior* to running the associated opcode
+    pub calldata: Bytes,
+    /// Returndata *prior* to running the associated opcode
+    pub returndata: Bytes,
     /// Opcode to be executed
-    pub instruction: Instruction,
-    /// Optional bytes that are being pushed onto the stack
-    pub push_bytes: Option<Vec<u8>>,
+    pub instruction: u8,
+    /// Optional bytes that are being pushed onto the stack.
+    /// Empty if the opcode is not a push or PUSH0.
+    #[serde(serialize_with = "hex::serialize", deserialize_with = "deserialize_arrayvec_hex")]
+    pub push_bytes: ArrayVec<u8, 32>,
     /// The program counter at this step.
     ///
     /// Note: To map this step onto source code using a source map, you must convert the program
@@ -142,8 +194,10 @@ impl Default for DebugStep {
         Self {
             stack: vec![],
             memory: Default::default(),
-            instruction: Instruction::OpCode(revm::interpreter::opcode::INVALID),
-            push_bytes: None,
+            calldata: Default::default(),
+            returndata: Default::default(),
+            instruction: revm::interpreter::opcode::INVALID,
+            push_bytes: Default::default(),
             pc: 0,
             total_gas_used: 0,
         }
@@ -153,48 +207,25 @@ impl Default for DebugStep {
 impl DebugStep {
     /// Pretty print the step's opcode
     pub fn pretty_opcode(&self) -> String {
-        if let Some(push_bytes) = &self.push_bytes {
-            format!("{}(0x{})", self.instruction, hex::encode(push_bytes))
+        let instruction = OpCode::new(self.instruction).map_or("INVALID", |op| op.as_str());
+        if !self.push_bytes.is_empty() {
+            format!("{instruction}(0x{})", hex::encode(&self.push_bytes))
         } else {
-            self.instruction.to_string()
+            instruction.to_string()
         }
     }
-}
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub enum Instruction {
-    OpCode(u8),
-    Cheatcode([u8; 4]),
-}
-
-impl From<u8> for Instruction {
-    fn from(op: u8) -> Instruction {
-        Instruction::OpCode(op)
+    /// Returns `true` if the opcode modifies memory.
+    pub fn opcode_modifies_memory(&self) -> bool {
+        OpCode::new(self.instruction).map_or(false, opcodes::modifies_memory)
     }
 }
 
-impl Display for Instruction {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Instruction::OpCode(op) => write!(
-                f,
-                "{}",
-                OpCode::new(*op).map_or_else(
-                    || format!("UNDEFINED(0x{op:02x})"),
-                    |opcode| opcode.as_str().to_string(),
-                )
-            ),
-            Instruction::Cheatcode(cheat) => write!(
-                f,
-                "VM_{}",
-                crate::abi::Vm::CHEATCODES
-                    .iter()
-                    .map(|c| &c.func)
-                    .find(|c| c.selector_bytes == *cheat)
-                    .expect("unknown cheatcode found in debugger")
-                    .id
-                    .to_uppercase()
-            ),
-        }
-    }
+fn deserialize_arrayvec_hex<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<ArrayVec<u8, 32>, D::Error> {
+    let bytes: Vec<u8> = hex::deserialize(deserializer)?;
+    let mut array = ArrayVec::new();
+    array.try_extend_from_slice(&bytes).map_err(serde::de::Error::custom)?;
+    Ok(array)
 }

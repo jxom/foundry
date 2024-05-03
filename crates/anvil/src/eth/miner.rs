@@ -1,7 +1,7 @@
 //! Mines transactions
 
 use crate::eth::pool::{transactions::PoolTransaction, Pool};
-use ethers::prelude::TxHash;
+use alloy_primitives::TxHash;
 use futures::{
     channel::mpsc::Receiver,
     stream::{Fuse, Stream, StreamExt},
@@ -17,7 +17,7 @@ use std::{
 };
 use tokio::time::Interval;
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub struct Miner {
     /// The mode this miner currently operates in
     mode: Arc<RwLock<MiningMode>>,

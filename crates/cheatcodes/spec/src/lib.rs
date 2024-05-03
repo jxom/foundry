@@ -83,10 +83,12 @@ impl Cheatcodes<'static> {
                 Vm::ChainInfo::STRUCT.clone(),
                 Vm::AccountAccess::STRUCT.clone(),
                 Vm::StorageAccess::STRUCT.clone(),
+                Vm::Gas::STRUCT.clone(),
             ]),
             enums: Cow::Owned(vec![
                 Vm::CallerMode::ENUM.clone(),
                 Vm::AccountAccessKind::ENUM.clone(),
+                Vm::ForgeContext::ENUM.clone(),
             ]),
             errors: Vm::VM_ERRORS.iter().map(|&x| x.clone()).collect(),
             events: Cow::Borrowed(&[]),
@@ -120,14 +122,17 @@ mod tests {
     }
 
     fn sol_iface() -> String {
-        let cheats = Cheatcodes::new().to_string().trim().replace('\n', "\n    ");
+        let mut cheats = Cheatcodes::new();
+        cheats.errors = Default::default(); // Skip errors to allow <0.8.4.
+        let cheats = cheats.to_string().trim().replace('\n', "\n    ");
         format!(
             "\
 // Automatically generated from `foundry-cheatcodes` Vm definitions. Do not modify manually.
 // This interface is just for internal testing purposes. Use `forge-std` instead.
 
 // SPDX-License-Identifier: MIT OR Apache-2.0
-pragma solidity ^0.8.4;
+pragma solidity >=0.6.2 <0.9.0;
+pragma experimental ABIEncoderV2;
 
 interface Vm {{
     {cheats}
@@ -164,7 +169,7 @@ interface Vm {{
 
         eprintln!("\n\x1b[31;1merror\x1b[0m: {} was not up-to-date, updating\n", file.display());
         if std::env::var("CI").is_ok() {
-            eprintln!("    NOTE: run `cargo test` locally and commit the updated files\n");
+            eprintln!("    NOTE: run `cargo cheats` locally and commit the updated files\n");
         }
         if let Some(parent) = file.parent() {
             let _ = fs::create_dir_all(parent);

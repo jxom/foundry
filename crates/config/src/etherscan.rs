@@ -4,6 +4,12 @@ use crate::{
     resolve::{interpolate, UnresolvedEnvVarError, RE_PLACEHOLDER},
     Chain, Config, NamedChain,
 };
+use figment::{
+    providers::Env,
+    value::{Dict, Map},
+    Error, Metadata, Profile, Provider,
+};
+use inflector::Inflector;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{
     collections::BTreeMap,
@@ -15,8 +21,33 @@ use std::{
 /// The user agent to use when querying the etherscan API.
 pub const ETHERSCAN_USER_AGENT: &str = concat!("foundry/", env!("CARGO_PKG_VERSION"));
 
+/// A [Provider] that provides Etherscan API key from the environment if it's not empty.
+///
+/// This prevents `ETHERSCAN_API_KEY=""` if it's set but empty
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub(crate) struct EtherscanEnvProvider;
+
+impl Provider for EtherscanEnvProvider {
+    fn metadata(&self) -> Metadata {
+        Env::raw().metadata()
+    }
+
+    fn data(&self) -> Result<Map<Profile, Dict>, Error> {
+        let mut dict = Dict::default();
+        let env_provider = Env::raw().only(&["ETHERSCAN_API_KEY"]);
+        if let Some((key, value)) = env_provider.iter().next() {
+            if !value.trim().is_empty() {
+                dict.insert(key.as_str().to_string(), value.into());
+            }
+        }
+
+        Ok(Map::from([(Config::selected_profile(), dict)]))
+    }
+}
+
 /// Errors that can occur when creating an `EtherscanConfig`
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum EtherscanConfigError {
     #[error(transparent)]
     Unresolved(#[from] UnresolvedEnvVarError),
@@ -29,7 +60,7 @@ pub enum EtherscanConfigError {
 }
 
 /// Container type for Etherscan API keys and URLs.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct EtherscanConfigs {
     configs: BTreeMap<String, EtherscanConfig>,
@@ -83,7 +114,7 @@ impl DerefMut for EtherscanConfigs {
 }
 
 /// Container type for _resolved_ etherscan keys, see [EtherscanConfigs::resolve_all()]
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ResolvedEtherscanConfigs {
     /// contains all named `ResolvedEtherscanConfig` or an error if we failed to resolve the env
     /// var alias
@@ -138,7 +169,7 @@ impl DerefMut for ResolvedEtherscanConfigs {
 }
 
 /// Represents all info required to create an etherscan client
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EtherscanConfig {
     /// The chain name or EIP-155 chain ID used to derive the API URL.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -172,7 +203,19 @@ impl EtherscanConfig {
         let (chain, alias) = match (chain, alias) {
             // fill one with the other
             (Some(chain), None) => (Some(chain), Some(chain.to_string())),
-            (None, Some(alias)) => (alias.parse().ok(), Some(alias.into())),
+            (None, Some(alias)) => {
+                // alloy chain is parsed as kebab case
+                (
+                    alias.to_kebab_case().parse().ok().or_else(|| {
+                        // if this didn't work try to parse as json because the deserialize impl
+                        // supports more aliases
+                        serde_json::from_str::<NamedChain>(&format!("\"{alias}\""))
+                            .map(Into::into)
+                            .ok()
+                    }),
+                    Some(alias.into()),
+                )
+            }
             // leave as is
             (Some(chain), Some(alias)) => (Some(chain), Some(alias.into())),
             (None, None) => (None, None),
@@ -194,7 +237,9 @@ impl EtherscanConfig {
                 Ok(ResolvedEtherscanConfig { api_url, browser_url: None, key, chain: None })
             }
             (None, None) => {
-                let msg = alias.map(|a| format!(" for Etherscan config `{a}`")).unwrap_or_default();
+                let msg = alias
+                    .map(|a| format!(" for Etherscan config with unknown alias `{a}`"))
+                    .unwrap_or_default();
                 Err(EtherscanConfigError::MissingUrlOrChain(msg))
             }
         }
@@ -202,7 +247,7 @@ impl EtherscanConfig {
 }
 
 /// Contains required url + api key to set up an etherscan client
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResolvedEtherscanConfig {
     /// Etherscan API URL.
     #[serde(rename = "url")]
@@ -261,32 +306,29 @@ impl ResolvedEtherscanConfig {
         let (mainnet_api, mainnet_url) = NamedChain::Mainnet.etherscan_urls().expect("exist; qed");
 
         let cache = chain
-            .or_else(|| {
-                if api_url == mainnet_api {
-                    // try to match against mainnet, which is usually the most common target
-                    Some(NamedChain::Mainnet.into())
-                } else {
-                    None
-                }
-            })
+            // try to match against mainnet, which is usually the most common target
+            .or_else(|| (api_url == mainnet_api).then(Chain::mainnet))
             .and_then(Config::foundry_etherscan_chain_cache_dir);
 
-        if let Some(ref cache_path) = cache {
+        if let Some(cache_path) = &cache {
             // we also create the `sources` sub dir here
             if let Err(err) = std::fs::create_dir_all(cache_path.join("sources")) {
                 warn!("could not create etherscan cache dir: {:?}", err);
             }
         }
 
+        let api_url = into_url(&api_url)?;
+        let client = reqwest::Client::builder()
+            .user_agent(ETHERSCAN_USER_AGENT)
+            .tls_built_in_root_certs(api_url.scheme() == "https")
+            .build()?;
         foundry_block_explorers::Client::builder()
-            .with_client(reqwest::Client::builder().user_agent(ETHERSCAN_USER_AGENT).build()?)
+            .with_client(client)
             .with_api_key(api_key)
-            .with_api_url(api_url.as_str())?
-            .with_url(
-                // the browser url is not used/required by the client so we can simply set the
-                // mainnet browser url here
-                browser_url.as_deref().unwrap_or(mainnet_url),
-            )?
+            .with_api_url(api_url)?
+            // the browser url is not used/required by the client so we can simply set the
+            // mainnet browser url here
+            .with_url(browser_url.as_deref().unwrap_or(mainnet_url))?
             .with_cache(cache, Duration::from_secs(24 * 60 * 60))
             .build()
     }
@@ -298,7 +340,7 @@ impl ResolvedEtherscanConfig {
 /// env var, then the `EtherscanKey::Key` var will hold the reference (`${MAIN_NET}`) and _not_ the
 /// value of the env var itself.
 /// In other words, this type does not resolve env vars when it's being deserialized
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EtherscanApiKey {
     /// A raw key
     Key(String),
@@ -374,6 +416,13 @@ impl fmt::Display for EtherscanApiKey {
     }
 }
 
+/// This is a hack to work around `IntoUrl`'s sealed private functions, which can't be called
+/// normally.
+#[inline]
+fn into_url(url: impl reqwest::IntoUrl) -> std::result::Result<reqwest::Url, reqwest::Error> {
+    url.into_url()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -438,5 +487,36 @@ mod tests {
         let _ = config.into_client().unwrap();
 
         std::env::remove_var(env);
+    }
+
+    #[test]
+    fn resolve_etherscan_alias_config() {
+        let mut configs = EtherscanConfigs::default();
+        configs.insert(
+            "blast_sepolia".to_string(),
+            EtherscanConfig {
+                chain: None,
+                url: Some("https://api.etherscan.io/api".to_string()),
+                key: EtherscanApiKey::Key("ABCDEFG".to_string()),
+            },
+        );
+
+        let mut resolved = configs.clone().resolved();
+        let config = resolved.remove("blast_sepolia").unwrap().unwrap();
+        assert_eq!(config.chain, Some(Chain::blast_sepolia()));
+    }
+
+    #[test]
+    fn resolve_etherscan_alias() {
+        let config = EtherscanConfig {
+            chain: None,
+            url: Some("https://api.etherscan.io/api".to_string()),
+            key: EtherscanApiKey::Key("ABCDEFG".to_string()),
+        };
+        let resolved = config.clone().resolve(Some("base_sepolia")).unwrap();
+        assert_eq!(resolved.chain, Some(Chain::base_sepolia()));
+
+        let resolved = config.resolve(Some("base-sepolia")).unwrap();
+        assert_eq!(resolved.chain, Some(Chain::base_sepolia()));
     }
 }

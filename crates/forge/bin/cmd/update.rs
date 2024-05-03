@@ -8,7 +8,7 @@ use foundry_config::{impl_figment_convert_basic, Config};
 use std::path::PathBuf;
 
 /// CLI arguments for `forge update`.
-#[derive(Debug, Clone, Parser)]
+#[derive(Clone, Debug, Parser)]
 pub struct UpdateArgs {
     /// The dependencies you want to update.
     dependencies: Vec<Dependency>,
@@ -17,15 +17,15 @@ pub struct UpdateArgs {
     ///
     /// By default root of the Git repository, if in one,
     /// or the current working directory.
-    #[clap(long, value_hint = ValueHint::DirPath, value_name = "PATH")]
+    #[arg(long, value_hint = ValueHint::DirPath, value_name = "PATH")]
     root: Option<PathBuf>,
 
     /// Override the up-to-date check.
-    #[clap(short, long)]
+    #[arg(short, long)]
     force: bool,
 
     /// Recursively update submodules.
-    #[clap(short, long)]
+    #[arg(short, long)]
     recursive: bool,
 }
 impl_figment_convert_basic!(UpdateArgs);
@@ -44,7 +44,7 @@ impl UpdateArgs {
             git.submodule_update(self.force, true, false, false, paths)?;
             // initialize submodules of each submodule recursively (otherwise direct submodule
             // dependencies will revert to last commit)
-            git.submodule_foreach(false, "git submodule update --init --progress --recursive ")
+            git.submodule_foreach(false, "git submodule update --init --progress --recursive")
         }
     }
 }

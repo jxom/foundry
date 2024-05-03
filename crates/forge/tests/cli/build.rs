@@ -24,3 +24,19 @@ contract Dummy {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/compile_json.stdout"),
     );
 });
+
+// tests build output is as expected
+forgetest_init!(exact_build_output, |prj, cmd| {
+    cmd.args(["build", "--force"]);
+    let stdout = cmd.stdout_lossy();
+    assert!(stdout.contains("Compiling"), "\n{stdout}");
+});
+
+// tests build output is as expected
+forgetest_init!(build_sizes_no_forge_std, |prj, cmd| {
+    cmd.args(["build", "--sizes"]);
+    let stdout = cmd.stdout_lossy();
+    assert!(!stdout.contains("console"), "\n{stdout}");
+    assert!(!stdout.contains("std"), "\n{stdout}");
+    assert!(stdout.contains("Counter"), "\n{stdout}");
+});

@@ -10,7 +10,7 @@ use std::{
 /// Configures file system access
 ///
 /// E.g. for cheat codes (`vm.writeFile`)
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct FsPermissions {
     /// what kind of access is allowed
@@ -25,6 +25,11 @@ impl FsPermissions {
         Self { permissions: permissions.into_iter().collect() }
     }
 
+    /// Adds a new permission
+    pub fn add(&mut self, permission: PathPermission) {
+        self.permissions.push(permission)
+    }
+
     /// Returns true if access to the specified path is allowed with the specified.
     ///
     /// This first checks permission, and only if it is granted, whether the path is allowed.
@@ -37,9 +42,30 @@ impl FsPermissions {
         self.find_permission(path).map(|perm| perm.is_granted(kind)).unwrap_or_default()
     }
 
-    /// Returns the permission for the matching path
+    /// Returns the permission for the matching path.
+    ///
+    /// This finds the longest matching path with resolved sym links, e.g. if we have the following
+    /// permissions:
+    ///
+    /// `./out` = `read`
+    /// `./out/contracts` = `read-write`
+    ///
+    /// And we check for `./out/contracts/MyContract.sol` we will get `read-write` as permission.
     pub fn find_permission(&self, path: &Path) -> Option<FsAccessPermission> {
-        self.permissions.iter().find(|perm| path.starts_with(&perm.path)).map(|perm| perm.access)
+        let mut permission: Option<&PathPermission> = None;
+        for perm in &self.permissions {
+            let permission_path = dunce::canonicalize(&perm.path).unwrap_or(perm.path.clone());
+            if path.starts_with(permission_path) {
+                if let Some(active_perm) = permission.as_ref() {
+                    // the longest path takes precedence
+                    if perm.path < active_perm.path {
+                        continue;
+                    }
+                }
+                permission = Some(perm);
+            }
+        }
+        permission.map(|perm| perm.access)
     }
 
     /// Updates all `allowed_paths` and joins ([`Path::join`]) the `root` with all entries
@@ -74,7 +100,7 @@ impl FsPermissions {
 }
 
 /// Represents an access permission to a single path
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PathPermission {
     /// Permission level to access the `path`
     pub access: FsAccessPermission,
@@ -117,7 +143,7 @@ impl PathPermission {
 }
 
 /// Represents the operation on the fs
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FsAccessKind {
     /// read from fs (`vm.readFile`)
     Read,
@@ -135,7 +161,7 @@ impl fmt::Display for FsAccessKind {
 }
 
 /// Determines the status of file system access
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum FsAccessPermission {
     /// FS access is _not_ allowed
     #[default]
@@ -237,5 +263,20 @@ mod tests {
         assert_eq!(FsAccessPermission::None, "none".parse().unwrap());
         assert_eq!(FsAccessPermission::Read, "read".parse().unwrap());
         assert_eq!(FsAccessPermission::Write, "write".parse().unwrap());
+    }
+
+    #[test]
+    fn nested_permissions() {
+        let permissions = FsPermissions::new(vec![
+            PathPermission::read("./"),
+            PathPermission::write("./out"),
+            PathPermission::read_write("./out/contracts"),
+        ]);
+
+        let permission =
+            permissions.find_permission(Path::new("./out/contracts/MyContract.sol")).unwrap();
+        assert_eq!(FsAccessPermission::ReadWrite, permission);
+        let permission = permissions.find_permission(Path::new("./out/MyContract.sol")).unwrap();
+        assert_eq!(FsAccessPermission::Write, permission);
     }
 }

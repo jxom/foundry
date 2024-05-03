@@ -3,32 +3,39 @@
 use alloy_json_abi::Function;
 use alloy_primitives::Bytes;
 use alloy_sol_types::SolError;
-use auto_impl::auto_impl;
+use std::path::Path;
 
-/// Extension trait for matching tests
-#[auto_impl(&)]
+/// Test filter.
 pub trait TestFilter: Send + Sync {
-    /// Returns whether the test should be included
-    fn matches_test(&self, test_name: impl AsRef<str>) -> bool;
-    /// Returns whether the contract should be included
-    fn matches_contract(&self, contract_name: impl AsRef<str>) -> bool;
-    /// Returns a contract with the given path should be included
-    fn matches_path(&self, path: impl AsRef<str>) -> bool;
+    /// Returns whether the test should be included.
+    fn matches_test(&self, test_name: &str) -> bool;
+
+    /// Returns whether the contract should be included.
+    fn matches_contract(&self, contract_name: &str) -> bool;
+
+    /// Returns a contract with the given path should be included.
+    fn matches_path(&self, path: &Path) -> bool;
 }
 
-/// Extension trait for `Function`
-#[auto_impl(&)]
+/// Extension trait for `Function`.
 pub trait TestFunctionExt {
-    /// Whether this function should be executed as invariant test
+    /// Returns whether this function should be executed as invariant test.
     fn is_invariant_test(&self) -> bool;
-    /// Whether this function should be executed as fuzz test
+
+    /// Returns whether this function should be executed as fuzz test.
     fn is_fuzz_test(&self) -> bool;
-    /// Whether this function is a test
+
+    /// Returns whether this function is a test.
     fn is_test(&self) -> bool;
-    /// Whether this function is a test that should fail
+
+    /// Returns whether this function is a test that should fail.
     fn is_test_fail(&self) -> bool;
-    /// Whether this function is a `setUp` function
+
+    /// Returns whether this function is a `setUp` function.
     fn is_setup(&self) -> bool;
+
+    /// Returns whether this function is a fixture function.
+    fn is_fixture(&self) -> bool;
 }
 
 impl TestFunctionExt for Function {
@@ -52,6 +59,10 @@ impl TestFunctionExt for Function {
     fn is_setup(&self) -> bool {
         self.name.is_setup()
     }
+
+    fn is_fixture(&self) -> bool {
+        self.name.is_fixture()
+    }
 }
 
 impl TestFunctionExt for String {
@@ -74,6 +85,10 @@ impl TestFunctionExt for String {
     fn is_setup(&self) -> bool {
         self.as_str().is_setup()
     }
+
+    fn is_fixture(&self) -> bool {
+        self.as_str().is_fixture()
+    }
 }
 
 impl TestFunctionExt for str {
@@ -82,7 +97,7 @@ impl TestFunctionExt for str {
     }
 
     fn is_fuzz_test(&self) -> bool {
-        unimplemented!("no naming convention for fuzz tests.")
+        unimplemented!("no naming convention for fuzz tests")
     }
 
     fn is_test(&self) -> bool {
@@ -95,6 +110,10 @@ impl TestFunctionExt for str {
 
     fn is_setup(&self) -> bool {
         self.eq_ignore_ascii_case("setup")
+    }
+
+    fn is_fixture(&self) -> bool {
+        self.starts_with("fixture")
     }
 }
 

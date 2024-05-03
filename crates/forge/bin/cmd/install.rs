@@ -21,8 +21,8 @@ static DEPENDENCY_VERSION_TAG_REGEX: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^v?\d+(\.\d+)*$").unwrap());
 
 /// CLI arguments for `forge install`.
-#[derive(Debug, Clone, Parser)]
-#[clap(override_usage = "forge install [OPTIONS] [DEPENDENCIES]...
+#[derive(Clone, Debug, Parser)]
+#[command(override_usage = "forge install [OPTIONS] [DEPENDENCIES]...
     forge install [OPTIONS] <github username>/<github project>@<tag>...
     forge install [OPTIONS] <alias>=<github username>/<github project>@<tag>...
     forge install [OPTIONS] <https:// git url>...")]
@@ -46,10 +46,10 @@ pub struct InstallArgs {
     ///
     /// By default root of the Git repository, if in one,
     /// or the current working directory.
-    #[clap(long, value_hint = ValueHint::DirPath, value_name = "PATH")]
+    #[arg(long, value_hint = ValueHint::DirPath, value_name = "PATH")]
     pub root: Option<PathBuf>,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     opts: DependencyInstallOpts,
 }
 
@@ -62,24 +62,24 @@ impl InstallArgs {
     }
 }
 
-#[derive(Debug, Clone, Default, Copy, Parser)]
+#[derive(Clone, Copy, Debug, Default, Parser)]
 pub struct DependencyInstallOpts {
     /// Perform shallow clones instead of deep ones.
     ///
     /// Improves performance and reduces disk usage, but prevents switching branches or tags.
-    #[clap(long)]
+    #[arg(long)]
     pub shallow: bool,
 
     /// Install without adding the dependency as a submodule.
-    #[clap(long)]
+    #[arg(long)]
     pub no_git: bool,
 
     /// Do not create a commit.
-    #[clap(long)]
+    #[arg(long)]
     pub no_commit: bool,
 
     /// Do not print any messages.
-    #[clap(short, long)]
+    #[arg(short, long)]
     pub quiet: bool,
 }
 
@@ -103,9 +103,7 @@ impl DependencyInstallOpts {
             if self.install(config, Vec::new()).is_err() && !quiet {
                 eprintln!(
                     "{}",
-                    Paint::yellow(
-                        "Your project has missing dependencies that could not be installed."
-                    )
+                    "Your project has missing dependencies that could not be installed.".yellow()
                 )
             }
             true
@@ -124,10 +122,24 @@ impl DependencyInstallOpts {
         let libs = git.root.join(install_lib_dir);
 
         if dependencies.is_empty() && !self.no_git {
-            p_println!(!self.quiet => "Updating dependencies in {}", libs.display());
-            // recursively fetch all submodules (without fetching latest)
-            git.submodule_update(false, false, false, true, Some(&libs))?;
+            // Use the root of the git repository to look for submodules.
+            let root = Git::root_of(git.root)?;
+            match git.has_submodules(Some(&root)) {
+                Ok(true) => {
+                    p_println!(!quiet => "Updating dependencies in {}", libs.display());
+                    // recursively fetch all submodules (without fetching latest)
+                    git.submodule_update(false, false, false, true, Some(&libs))?;
+                }
+
+                Err(err) => {
+                    warn!(?err, "Failed to check for submodules");
+                }
+                _ => {
+                    // no submodules, nothing to do
+                }
+            }
         }
+
         fs::create_dir_all(&libs)?;
 
         let installer = Installer { git, no_commit };
@@ -179,7 +191,7 @@ impl DependencyInstallOpts {
             }
 
             if !quiet {
-                let mut msg = format!("    {} {}", Paint::green("Installed"), dep.name);
+                let mut msg = format!("    {} {}", "Installed".green(), dep.name);
                 if let Some(tag) = dep.tag.or(installed_tag) {
                     msg.push(' ');
                     msg.push_str(tag.as_str());
@@ -222,6 +234,15 @@ impl Installer<'_> {
         // checkout the tag if necessary
         self.git_checkout(&dep, path, false)?;
 
+        trace!("updating dependency submodules recursively");
+        self.git.root(path).submodule_update(
+            false,
+            false,
+            false,
+            true,
+            std::iter::empty::<PathBuf>(),
+        )?;
+
         // remove git artifacts
         fs::remove_dir_all(path.join(".git"))?;
 
@@ -244,6 +265,15 @@ impl Installer<'_> {
 
         // checkout the tag if necessary
         self.git_checkout(&dep, path, true)?;
+
+        trace!("updating dependency submodules recursively");
+        self.git.root(path).submodule_update(
+            false,
+            false,
+            false,
+            true,
+            std::iter::empty::<PathBuf>(),
+        )?;
 
         if !self.no_commit {
             self.git.add(Some(path))?;
@@ -301,10 +331,7 @@ impl Installer<'_> {
         let path = path.strip_prefix(self.git.root).unwrap();
 
         trace!(?dep, url, ?path, "installing git submodule");
-        self.git.submodule_add(true, url, path)?;
-
-        trace!("initializing submodule recursively");
-        self.git.submodule_update(false, false, false, true, Some(path))
+        self.git.submodule_add(true, url, path)
     }
 
     fn git_checkout(self, dep: &Dependency, path: &Path, recurse: bool) -> Result<String> {
@@ -491,6 +518,7 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
+    #[ignore = "slow"]
     fn get_oz_tags() {
         let tmp = tempdir().unwrap();
         let git = Git::new(tmp.path());

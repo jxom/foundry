@@ -6,7 +6,7 @@ use crate::{
     snapshot::Snapshots,
 };
 use alloy_primitives::{Address, B256, U256};
-use ethers_core::types::BlockId;
+use alloy_rpc_types::BlockId;
 use parking_lot::Mutex;
 use revm::{
     db::{CacheDB, DatabaseRef},
@@ -21,7 +21,7 @@ use std::sync::Arc;
 /// endpoint. The inner in-memory database holds this storage and will be used for write operations.
 /// This database uses the `backend` for read and the `db` for write operations. But note the
 /// `backend` will also write (missing) data to the `db` in the background
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub struct ForkedDatabase {
     /// responsible for fetching missing data
     ///
@@ -267,14 +267,14 @@ impl DatabaseRef for ForkDbSnapshot {
 mod tests {
     use super::*;
     use crate::fork::BlockchainDbMeta;
-    use foundry_common::get_http_provider;
+    use foundry_common::provider::get_http_provider;
     use std::collections::BTreeSet;
 
     /// Demonstrates that `Database::basic` for `ForkedDatabase` will always return the
     /// `AccountInfo`
     #[tokio::test(flavor = "multi_thread")]
     async fn fork_db_insert_basic_default() {
-        let rpc = foundry_common::rpc::next_http_rpc_endpoint();
+        let rpc = foundry_test_utils::rpc::next_http_rpc_endpoint();
         let provider = get_http_provider(rpc.clone());
         let meta = BlockchainDbMeta {
             cfg_env: Default::default(),

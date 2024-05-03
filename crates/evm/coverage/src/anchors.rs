@@ -1,24 +1,33 @@
+use std::collections::HashMap;
+
 use super::{CoverageItem, CoverageItemKind, ItemAnchor, SourceLocation};
 use alloy_primitives::Bytes;
 use foundry_compilers::sourcemap::{SourceElement, SourceMap};
-use foundry_evm_core::utils::ICPCMap;
+use foundry_evm_core::utils::IcPcMap;
 use revm::{
     interpreter::opcode::{self, spec_opcode_gas},
-    primitives::SpecId,
+    primitives::{HashSet, SpecId},
 };
 
 /// Attempts to find anchors for the given items using the given source map and bytecode.
 pub fn find_anchors(
     bytecode: &Bytes,
     source_map: &SourceMap,
-    ic_pc_map: &ICPCMap,
-    item_ids: &[usize],
+    ic_pc_map: &IcPcMap,
     items: &[CoverageItem],
+    items_by_source_id: &HashMap<usize, Vec<usize>>,
 ) -> Vec<ItemAnchor> {
-    item_ids
+    // Prepare coverage items from all sources referenced in the source map
+    let potential_item_ids = source_map
         .iter()
+        .filter_map(|element| items_by_source_id.get(&(element.index? as usize)))
+        .flatten()
+        .collect::<HashSet<_>>();
+
+    potential_item_ids
+        .into_iter()
         .filter_map(|item_id| {
-            let item = items.get(*item_id)?;
+            let item = &items[*item_id];
 
             match item.kind {
                 CoverageItemKind::Branch { path_id, .. } => {
@@ -49,7 +58,7 @@ pub fn find_anchors(
 /// Find an anchor representing the first opcode within the given source range.
 pub fn find_anchor_simple(
     source_map: &SourceMap,
-    ic_pc_map: &ICPCMap,
+    ic_pc_map: &IcPcMap,
     item_id: usize,
     loc: &SourceLocation,
 ) -> eyre::Result<ItemAnchor> {
@@ -62,7 +71,7 @@ pub fn find_anchor_simple(
         })?;
 
     Ok(ItemAnchor {
-        instruction: *ic_pc_map.get(&instruction).ok_or_else(|| {
+        instruction: ic_pc_map.get(instruction).ok_or_else(|| {
             eyre::eyre!("We found an anchor, but we cant translate it to a program counter")
         })?,
         item_id,

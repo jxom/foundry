@@ -1,26 +1,29 @@
-use alloy_json_abi::JsonAbi as Abi;
+use alloy_json_abi::JsonAbi;
 use alloy_primitives::Address;
 use eyre::{Result, WrapErr};
 use foundry_common::{cli_warn, fs, TestFunctionExt};
 use foundry_compilers::{
     artifacts::{CompactBytecode, CompactDeployedBytecode},
     cache::{CacheEntry, SolFilesCache},
-    info::ContractInfo,
     utils::read_json_file,
     Artifact, ProjectCompileOutput,
 };
 use foundry_config::{error::ExtractConfigError, figment::Figment, Chain, Config, NamedChain};
-use foundry_debugger::DebuggerBuilder;
+use foundry_debugger::Debugger;
 use foundry_evm::{
     debug::DebugArena,
-    executors::{DeployResult, EvmError, ExecutionErr, RawCallResult},
+    executors::{DeployResult, EvmError, RawCallResult},
     opts::EvmOpts,
     traces::{
         identifier::{EtherscanIdentifier, SignaturesIdentifier},
-        CallTraceDecoder, CallTraceDecoderBuilder, TraceKind, Traces,
+        render_trace_arena, CallTraceDecoder, CallTraceDecoderBuilder, TraceKind, Traces,
     },
 };
-use std::{fmt::Write, path::PathBuf, str::FromStr};
+use std::{
+    fmt::Write,
+    path::{Path, PathBuf},
+    str::FromStr,
+};
 use yansi::Paint;
 
 /// Given a `Project`'s output, removes the matching ABI, Bytecode and
@@ -28,16 +31,17 @@ use yansi::Paint;
 #[track_caller]
 pub fn remove_contract(
     output: &mut ProjectCompileOutput,
-    info: &ContractInfo,
-) -> Result<(Abi, CompactBytecode, CompactDeployedBytecode)> {
-    let contract = if let Some(contract) = output.remove_contract(info) {
+    path: &Path,
+    name: &str,
+) -> Result<(JsonAbi, CompactBytecode, CompactDeployedBytecode)> {
+    let contract = if let Some(contract) = output.remove(path.to_string_lossy(), name) {
         contract
     } else {
-        let mut err = format!("could not find artifact: `{}`", info.name);
+        let mut err = format!("could not find artifact: `{}`", name);
         if let Some(suggestion) =
-            super::did_you_mean(&info.name, output.artifacts().map(|(name, _)| name)).pop()
+            super::did_you_mean(name, output.artifacts().map(|(name, _)| name)).pop()
         {
-            if suggestion != info.name {
+            if suggestion != name {
                 err = format!(
                     r#"{err}
 
@@ -50,17 +54,17 @@ pub fn remove_contract(
 
     let abi = contract
         .get_abi()
-        .ok_or_else(|| eyre::eyre!("contract {} does not contain abi", info))?
+        .ok_or_else(|| eyre::eyre!("contract {} does not contain abi", name))?
         .into_owned();
 
     let bin = contract
         .get_bytecode()
-        .ok_or_else(|| eyre::eyre!("contract {} does not contain bytecode", info))?
+        .ok_or_else(|| eyre::eyre!("contract {} does not contain bytecode", name))?
         .into_owned();
 
     let runtime = contract
         .get_deployed_bytecode()
-        .ok_or_else(|| eyre::eyre!("contract {} does not contain deployed bytecode", info))?
+        .ok_or_else(|| eyre::eyre!("contract {} does not contain deployed bytecode", name))?
         .into_owned();
 
     Ok((abi, bin, runtime))
@@ -93,7 +97,7 @@ pub fn get_cached_entry_by_name(
     }
 
     if let Some(entry) = cached_entry {
-        return Ok(entry)
+        return Ok(entry);
     }
 
     let mut err = format!("could not find artifact: `{name}`");
@@ -108,7 +112,7 @@ pub fn get_cached_entry_by_name(
 }
 
 /// Returns error if constructor has arguments.
-pub fn ensure_clean_constructor(abi: &Abi) -> Result<()> {
+pub fn ensure_clean_constructor(abi: &JsonAbi) -> Result<()> {
     if let Some(constructor) = &abi.constructor {
         if !constructor.inputs.is_empty() {
             eyre::bail!("Contract constructor should have no arguments. Add those arguments to  `run(...)` instead, and call it with `--sig run(...)`.");
@@ -117,14 +121,14 @@ pub fn ensure_clean_constructor(abi: &Abi) -> Result<()> {
     Ok(())
 }
 
-pub fn needs_setup(abi: &Abi) -> bool {
+pub fn needs_setup(abi: &JsonAbi) -> bool {
     let setup_fns: Vec<_> = abi.functions().filter(|func| func.name.is_setup()).collect();
 
     for setup_fn in setup_fns.iter() {
         if setup_fn.name != "setUp" {
             println!(
                 "{} Found invalid setup function \"{}\" did you mean \"setUp()\"?",
-                Paint::yellow("Warning:").bold(),
+                "Warning:".yellow().bold(),
                 setup_fn.signature()
             );
         }
@@ -175,7 +179,7 @@ pub fn has_different_gas_calc(chain_id: u64) -> bool {
                 NamedChain::Moonriver |
                 NamedChain::Moonbase |
                 NamedChain::MoonbeamDev
-        )
+        );
     }
     false
 }
@@ -189,7 +193,7 @@ pub fn has_batch_support(chain_id: u64) -> bool {
                 NamedChain::ArbitrumTestnet |
                 NamedChain::ArbitrumGoerli |
                 NamedChain::ArbitrumSepolia
-        )
+        );
     }
     true
 }
@@ -316,6 +320,7 @@ pub fn read_constructor_args_file(constructor_args_path: PathBuf) -> Result<Vec<
 }
 
 /// A slimmed down return from the executor used for returning minimal trace + gas metering info
+#[derive(Debug)]
 pub struct TraceResult {
     pub success: bool,
     pub traces: Traces,
@@ -338,8 +343,7 @@ impl From<RawCallResult> for TraceResult {
 
 impl From<DeployResult> for TraceResult {
     fn from(result: DeployResult) -> Self {
-        let DeployResult { gas_used, traces, debug, .. } = result;
-
+        let RawCallResult { gas_used, traces, debug, .. } = result.raw;
         Self {
             success: true,
             traces: vec![(TraceKind::Execution, traces.expect("traces is None"))],
@@ -355,7 +359,7 @@ impl TryFrom<EvmError> for TraceResult {
     fn try_from(err: EvmError) -> Result<Self, Self::Error> {
         match err {
             EvmError::Execution(err) => {
-                let ExecutionErr { reverted, gas_used, traces, debug: run_debug, .. } = *err;
+                let RawCallResult { reverted, gas_used, traces, debug: run_debug, .. } = err.raw;
                 Ok(TraceResult {
                     success: !reverted,
                     traces: vec![(TraceKind::Execution, traces.expect("traces is None"))],
@@ -374,73 +378,68 @@ pub async fn handle_traces(
     config: &Config,
     chain: Option<Chain>,
     labels: Vec<String>,
-    verbose: bool,
     debug: bool,
 ) -> Result<()> {
-    let mut etherscan_identifier = EtherscanIdentifier::new(config, chain)?;
-
-    let labeled_addresses = labels.iter().filter_map(|label_str| {
+    let labels = labels.iter().filter_map(|label_str| {
         let mut iter = label_str.split(':');
 
         if let Some(addr) = iter.next() {
             if let (Ok(address), Some(label)) = (Address::from_str(addr), iter.next()) {
-                return Some((address, label.to_string()))
+                return Some((address, label.to_string()));
             }
         }
         None
     });
-
+    let config_labels = config.labels.clone().into_iter();
     let mut decoder = CallTraceDecoderBuilder::new()
-        .with_labels(labeled_addresses)
+        .with_labels(labels.chain(config_labels))
         .with_signature_identifier(SignaturesIdentifier::new(
             Config::foundry_cache_dir(),
             config.offline,
         )?)
         .build();
 
-    for (_, trace) in &mut result.traces {
-        decoder.identify(trace, &mut etherscan_identifier);
+    let mut etherscan_identifier = EtherscanIdentifier::new(config, chain)?;
+    if let Some(etherscan_identifier) = &mut etherscan_identifier {
+        for (_, trace) in &mut result.traces {
+            decoder.identify(trace, etherscan_identifier);
+        }
     }
 
     if debug {
-        let sources = etherscan_identifier.get_compiled_contracts().await?;
-        let mut debugger = DebuggerBuilder::new()
+        let sources = if let Some(etherscan_identifier) = etherscan_identifier {
+            etherscan_identifier.get_compiled_contracts().await?
+        } else {
+            Default::default()
+        };
+        let mut debugger = Debugger::builder()
             .debug_arena(&result.debug)
             .decoder(&decoder)
             .sources(sources)
-            .build()?;
+            .build();
         debugger.try_run()?;
     } else {
-        print_traces(&mut result, &decoder, verbose).await?;
+        print_traces(&mut result, &decoder).await?;
     }
 
     Ok(())
 }
 
-pub async fn print_traces(
-    result: &mut TraceResult,
-    decoder: &CallTraceDecoder,
-    verbose: bool,
-) -> Result<()> {
+pub async fn print_traces(result: &mut TraceResult, decoder: &CallTraceDecoder) -> Result<()> {
     if result.traces.is_empty() {
         panic!("No traces found")
     }
 
     println!("Traces:");
-    for (_, trace) in &mut result.traces {
-        decoder.decode(trace).await;
-        if !verbose {
-            println!("{trace}");
-        } else {
-            println!("{trace:#}");
-        }
+    for (_, arena) in &result.traces {
+        println!("{}", render_trace_arena(arena, decoder).await?);
     }
     println!();
 
     if result.success {
-        println!("{}", Paint::green("Transaction successfully executed."));
+        println!("{}", "Transaction successfully executed.".green());
     } else {
-        println!("{}", Paint::red("Transaction failed."));
+        println!("{}", "Transaction failed.".red());
     }
 
     println!("Gas used: {}", result.gas_used);

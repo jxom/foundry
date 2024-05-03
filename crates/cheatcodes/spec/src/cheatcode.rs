@@ -50,6 +50,11 @@ pub enum Status {
     ///
     /// Use of removed cheatcodes will result in a hard error.
     Removed,
+    /// The cheatcode is only used internally for foundry testing and may be changed or removed at
+    /// any time.
+    ///
+    /// Use of internal cheatcodes is discouraged and will result in a warning.
+    Internal,
 }
 
 /// Cheatcode groups.
@@ -103,6 +108,12 @@ pub enum Group {
     ///
     /// Safety: safe.
     Json,
+    /// Utility cheatcodes that deal with parsing values from and converting values to TOML.
+    ///
+    /// Examples: `parseToml`, `writeToml`.
+    ///
+    /// Safety: safe.
+    Toml,
     /// Generic, uncategorized utilities.
     ///
     /// Examples: `toString`, `parse*`, `serialize*`.
@@ -125,6 +136,7 @@ impl Group {
             Self::Environment |
             Self::String |
             Self::Json |
+            Self::Toml |
             Self::Utilities => Some(Safety::Safe),
         }
     }
@@ -140,6 +152,7 @@ impl Group {
             Self::Environment => "environment",
             Self::String => "string",
             Self::Json => "json",
+            Self::Toml => "toml",
             Self::Utilities => "utilities",
         }
     }
