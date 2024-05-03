@@ -601,6 +601,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "alphanet-instructions"
+version = "0.0.0"
+source = "git+https://github.com/paradigmxyz/alphanet.git?rev=87be409#87be409101bab9c8977b0e74edfb25334511a74c"
+dependencies = [
+ "revm",
+ "revm-interpreter",
+ "revm-precompile",
+ "revm-primitives",
+]
+
+[[package]]
 name = "ammonia"
 version = "3.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3948,6 +3959,7 @@ dependencies = [
  "alloy-rpc-types",
  "alloy-sol-types",
  "alloy-transport",
+ "alphanet-instructions",
  "arrayvec",
  "auto_impl",
  "const-hex",

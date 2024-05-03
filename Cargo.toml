@@ -147,6 +147,7 @@ revm-primitives = { version = "3", default-features = false }
 revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "813d7e7", features = [
     "serde",
 ] }
+alphanet-instructions = { git = "https://github.com/paradigmxyz/alphanet.git", rev = "87be409", features = ["optimism"] }
 
 ## ethers
 ethers = { version = "2.0.14", default-features = false }
