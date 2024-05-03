@@ -376,6 +376,9 @@ pub struct Config {
     /// Should be removed once EvmVersion Cancun is supported by solc
     pub cancun: bool,
 
+    /// Temporary config to enable [SpecId::PRAGUE]
+    pub prague: bool,
+
     /// Whether to enable call isolation.
     ///
     /// Useful for more correct gas accounting and EVM behavior in general.
@@ -846,7 +849,9 @@ impl Config {
     /// Returns the [SpecId] derived from the configured [EvmVersion]
     #[inline]
     pub fn evm_spec_id(&self) -> SpecId {
-        if self.cancun {
+        if self.prague {
+            return SpecId::PRAGUE
+        } else if self.cancun {
             return SpecId::CANCUN
         }
         evm_spec_id(&self.evm_version)
@@ -1912,6 +1917,7 @@ impl Default for Config {
             profile: Self::DEFAULT_PROFILE,
             fs_permissions: FsPermissions::new([PathPermission::read("out")]),
             cancun: false,
+            prague: false,
             isolate: false,
             __root: Default::default(),
             src: "src".into(),

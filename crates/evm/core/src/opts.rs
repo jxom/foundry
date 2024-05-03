@@ -192,7 +192,7 @@ impl EvmOpts {
         if let Some(ref url) = self.fork_url {
             if url.contains("mainnet") {
                 trace!(?url, "auto detected mainnet chain");
-                return Some(Chain::mainnet());
+                return Some(Chain::mainnet())
             }
             trace!(?url, "retrieving chain via eth_chainId");
             let provider = ProviderBuilder::new(url.as_str())

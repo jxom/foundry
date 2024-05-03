@@ -187,6 +187,7 @@ pub async fn render_trace(
         };
 
         let action = match trace.kind {
+            CallKind::AuthCall => " [authcall]",
             CallKind::Call => "",
             CallKind::StaticCall => " [staticcall]",
             CallKind::CallCode => " [callcode]",

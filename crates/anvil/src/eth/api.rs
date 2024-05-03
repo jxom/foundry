@@ -2652,6 +2652,7 @@ impl TryFrom<Result<(InstructionResult, Option<Output>, u128, State)>> for GasEs
                 InstructionResult::CreateContractSizeLimit |
                 InstructionResult::CreateContractStartingWithEF |
                 InstructionResult::CreateInitCodeSizeLimit |
+                InstructionResult::ActiveAccountUnsetAuthCall |
                 InstructionResult::FatalExternalError |
                 InstructionResult::OutOfFunds |
                 InstructionResult::CallTooDeep => Ok(Self::EvmError(exit)),

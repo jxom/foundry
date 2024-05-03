@@ -198,7 +198,7 @@ impl Create2Args {
                 loop {
                     // Stop if a result was found in another thread.
                     if found.load(Ordering::Relaxed) {
-                        break None;
+                        break None
                     }
 
                     // Calculate the `CREATE2` address.

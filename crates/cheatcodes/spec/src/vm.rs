@@ -48,6 +48,8 @@ interface Vm {
         CallCode,
         /// The account was called via staticcall.
         StaticCall,
+        /// The account was called via authcall.
+        AuthCall,
         /// The account was created.
         Create,
         /// The account was selfdestructed.

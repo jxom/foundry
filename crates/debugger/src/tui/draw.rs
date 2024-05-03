@@ -193,6 +193,7 @@ impl DebuggerContext<'_> {
     fn draw_src(&self, f: &mut Frame<'_>, area: Rect) {
         let text_output = self.src_text(area);
         let title = match self.call_kind() {
+            CallKind::AuthCall => "Auth call",
             CallKind::Create | CallKind::Create2 => "Contract creation",
             CallKind::Call => "Contract call",
             CallKind::StaticCall => "Contract staticcall",
